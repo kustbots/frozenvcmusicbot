@@ -65,7 +65,7 @@ API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 ASSISTANT_SESSION = os.environ.get("ASSISTANT_SESSION")
-OWNER_ID = int(os.getenv("OWNER_ID", "5268762773"))
+OWNER_ID = int(os.environ.get("OWNER_ID"))
 
 # ——— Monkey-patch resolve_peer ——————————————
 logging.getLogger("pyrogram").setLevel(logging.ERROR)
@@ -100,13 +100,13 @@ assistant = Client("assistant_account", session_string=ASSISTANT_SESSION)
 call_py = PyTgCalls(assistant)
 
 
-ASSISTANT_USERNAME = None
-ASSISTANT_CHAT_ID = None
+ASSISTANT_USERNAME = os.environ.get("ASSISTANT_USERNAME")
+ASSISTANT_CHAT_ID = 8275352871
 API_ASSISTANT_USERNAME = os.getenv("API_ASSISTANT_USERNAME")
 
 
 # ─── MongoDB Setup ─────────────────────────────────────────
-mongo_uri = os.environ.get("MongoDB_url")
+mongo_uri = os.environ.get("mongodb+srv://rj5706603:O95nvJYxapyDHfkw@cluster0.fzmckei.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 mongo_client = MongoClient(mongo_uri)
 db = mongo_client["music_bot"]
 
@@ -382,16 +382,18 @@ async def start_handler(_, message):
     )
 
     caption = (
-        f"👋 нєу {user_link} 💠, 🥀\n\n"
-        f">🎶 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 {BOT_NAME.upper()}! 🎵\n"
-        ">🚀 𝗧𝗢𝗣-𝗡𝗢𝗧𝗖𝗛 24×7 𝗨𝗣𝗧𝗜𝗠𝗘 & 𝗦𝗨𝗣𝗣𝗢𝗥𝗧\n"
-        ">🔊 𝗖𝗥𝗬𝗦𝗧𝗔𝗟-𝗖𝗟𝗘𝗔𝗥 𝗔𝗨𝗗𝗜𝗢\n"
-        ">🎧 𝗦𝗨𝗣𝗣𝗢𝗥𝗧𝗘𝗗 𝗣𝗟𝗔𝗧𝗙𝗢𝗥𝗠𝗦: YouTube | Spotify | Resso | Apple Music | SoundCloud\n"
-        ">✨ 𝗔𝗨𝗧𝗢-𝗦𝗨𝗚𝗚𝗘𝗦𝗧𝗜𝗢𝗡𝗦 when queue ends\n"
-        ">🛠️ 𝗔𝗗𝗠𝗜𝗡 𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦: Pause, Resume, Skip, Stop, Mute, Unmute, Tmute, Kick, Ban, Unban, Couple\n"
-        ">❤️ 𝗖𝗢𝗨𝗣𝗟𝗘 𝗦𝗨𝗚𝗚𝗘𝗦𝗧𝗜𝗢𝗡 (pick random pair in group)\n"
-        f"๏ ᴄʟɪᴄᴋ {help_text} ʙᴇʟᴏᴡ ғᴏʀ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ."
-    )
+    f"🌸 ʜᴇʏ {user_link} ˚₊‧꒰ა 💕 ໒꒱ ‧₊˚\n\n"
+    f"💖 ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ❝ {BOT_NAME.upper()} ❞ 🎶✨\n"
+    "┌─────────────────────────────⋆｡°✩\n"
+    "🌷 24×7 ᴏɴʟɪɴᴇ ʙᴀʙʏ ✨\n"
+    "🎧 ᴄʀʏsᴛᴀʟ ᴄʟᴇᴀʀ ᴀᴜᴅɪᴏ 🌸\n"
+    "💌 sᴜᴘᴘᴏʀᴛᴇᴅ: ʏᴏᴜᴛᴜʙᴇ | sᴘᴏᴛɪғʏ | ʀᴇssᴏ | ᴀᴘᴘʟᴇ ᴍᴜsɪᴄ | sᴏᴜɴᴅᴄʟᴏᴜᴅ\n"
+    "✨ ᴀᴜᴛᴏ sᴜɢɢᴇsᴛɪᴏɴs ᴡʜᴇɴ qᴜᴇᴜᴇ ᴇɴᴅs 🌷\n"
+    "💖 ᴀᴅᴍɪɴ ғᴜɴᴄᴛɪᴏɴs: ᴘᴀᴜsᴇ ▸ ʀᴇsᴜᴍᴇ ▸ sᴋɪᴘ ▸ sᴛᴏᴘ ▸ ᴍᴜᴛᴇ ▸ ʙᴀɴ ▸ ᴄᴏᴜᴘʟᴇ 💕\n"
+    "🌸👀 ᴄᴜᴛᴇ ᴄᴏᴜᴘʟᴇ ᴘɪᴄᴋᴇʀ (ʀᴀɴᴅᴏᴍ ᴘᴀɪʀ 💖)\n"
+    "└─────────────────────────────⋆｡°✩\n\n"
+    f"🌷 ᴛᴀᴘ {help_text} ғᴏʀ ғᴜʟʟ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 💕"
+)
 
     buttons = [
         [
