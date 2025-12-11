@@ -57,6 +57,7 @@ from FrozenMusic.infra.vector.yt_backup_engine import yt_backup_engine
 from FrozenMusic.infra.chrono.chrono_formatter import quantum_temporal_humanizer
 from FrozenMusic.vector_text_tools import vectorized_unicode_boldifier
 from FrozenMusic.telegram_client.startup_hooks import precheck_channels
+from collections import deque
 
 load_dotenv()
 
@@ -1410,12 +1411,8 @@ async def broadcast_handler(_, message):
 
 
 
-@bot.on_message(filters.command("frozen_check"))
-async def frozen_check_command(client: Client, message):
-    await message.reply_text("frozen check successful ✨")
 
-
-
+# --- save/load state (unchanged) ---
 def save_state_to_db():
     """
     Persist only chat_containers (queues) into MongoDB before restart.
@@ -1450,33 +1447,203 @@ def load_state_from_db():
             continue
 
 
-
 logger = logging.getLogger(__name__)
 
 RESTART_CHANNEL_ID = -1001849376366  # Your channel/chat ID
 
-async def heartbeat():
-    while True:
-        await asyncio.sleep(3 * 3600)  # every 10 hours
+# ─── Connection Watchdog ────────────────────────────────────────────────────────
+async def connection_watchdog():
+    """Kills the container if the bot hasn't received any new messages (including callback queries)
+    in the last STALE_SECONDS.
+
+    Key behavior:
+    - Installs lightweight handlers at runtime (message + callback_query) to record activity timestamps.
+    - Uses a time-pruned deque on the `bot` object to store recent activity (keeps memory bounded).
+    - Health check only depends on recent activity timestamps (no active ping fallback).
+    - If no activity in the last STALE_SECONDS -> exit immediately via os._exit(0).
+    - Sends a one-line restart/restore message to RESTART_CHANNEL_ID when appropriate (fire-and-forget).
+    - Keeps external names `bot`, `logger`, `RESTART_CHANNEL_ID` unchanged.
+    """
+    # --- configuration ---
+    CHECK_INTERVAL = 15.0       # how often watchdog runs (seconds)
+    STALE_SECONDS = 60.0        # consider "dead" if no activity within this window (seconds)
+    DEQUE_MAXLEN = 2000         # max items stored (safety cap)
+    PRUNE_THRESHOLD = STALE_SECONDS * 3  # prune anything older than this to keep deque small
+
+    # Install lightweight activity handlers once (if running under Pyrogram)
+    def _install_handlers_once():
+        if getattr(bot, "_watchdog_handlers_installed", False):
+            return
+
+        # create the deque on bot
         try:
-            logger.info("💤 Heartbeat: performing full restart to prevent MTProto freeze...")
+            bot._watchdog_msg_deque = deque(maxlen=DEQUE_MAXLEN)
+        except Exception:
+            # fallback: plain list if deque creation fails for some reason
+            bot._watchdog_msg_deque = []
 
-            # Notify channel before restart
-            pre_msg = None
+        # async handler for incoming messages
+        async def _wd_message_handler(client, message):
             try:
-                pre_msg = await bot.send_message(RESTART_CHANNEL_ID, "⚡ Bot is restarting (scheduled heartbeat)")
-            except Exception as e:
-                logger.warning(f"Failed to notify channel about restart: {e}")
+                ts = time.time()
+                dq = bot._watchdog_msg_deque
+                # append in a safe manner
+                if isinstance(dq, deque):
+                    dq.append(ts)
+                    # quick prune: pop left while too old to avoid growth
+                    cutoff = ts - PRUNE_THRESHOLD
+                    while dq and dq[0] < cutoff:
+                        dq.popleft()
+                else:
+                    dq.append(ts)
+                    # if list too long, keep only recent slice
+                    if len(dq) > DEQUE_MAXLEN:
+                        del dq[0 : len(dq) - DEQUE_MAXLEN]
+            except Exception:
+                # handler must never raise; swallow errors silently
+                return
 
-            # Save state to DB
-            save_state_to_db()
-            logger.info("✅ Bot state saved to DB")
+        # async handler for callback queries (these don't come through on_message)
+        async def _wd_callback_handler(client, callback_query):
+            try:
+                ts = time.time()
+                dq = bot._watchdog_msg_deque
+                if isinstance(dq, deque):
+                    dq.append(ts)
+                    cutoff = ts - PRUNE_THRESHOLD
+                    while dq and dq[0] < cutoff:
+                        dq.popleft()
+                else:
+                    dq.append(ts)
+                    if len(dq) > DEQUE_MAXLEN:
+                        del dq[0 : len(dq) - DEQUE_MAXLEN]
+            except Exception:
+                return
 
-            # Fully restart the process (like /restart endpoint)
-            os.execl(sys.executable, sys.executable, *sys.argv)
+        # try to register handlers using Pyrogram's add_handler if available
+        installed = False
+        try:
+            # import handler classes lazily
+            from pyrogram.handlers import MessageHandler, CallbackQueryHandler
 
-        except Exception as e:
-            logger.error(f"❌ Heartbeat restart failed: {e}")
+            # add handlers; group number is left default unless add_handler signature requires group
+            try:
+                bot.add_handler(MessageHandler(_wd_message_handler), group=-100)
+                bot.add_handler(CallbackQueryHandler(_wd_callback_handler), group=-100)
+            except TypeError:
+                # some versions expect different signature; try without group
+                bot.add_handler(MessageHandler(_wd_message_handler))
+                bot.add_handler(CallbackQueryHandler(_wd_callback_handler))
+
+            installed = True
+        except Exception:
+            # If adding handlers fails (non-Pyrogram environment), attempt to attach to known decorator lists
+            try:
+                if hasattr(bot, "add_message_handler"):
+                    bot.add_message_handler(_wd_message_handler)
+                    installed = True
+            except Exception:
+                installed = False
+
+        # mark installed flag regardless to avoid repeated attempts
+        bot._watchdog_handlers_installed = True
+        bot._watchdog_handlers_present = installed
+
+    # ensure handlers are installed before entering loop
+    try:
+        _install_handlers_once()
+    except Exception:
+        # installation failed but continue; watchdog will still attempt to use deque if present
+        bot._watchdog_handlers_installed = True
+        bot._watchdog_handlers_present = False
+
+    was_down = False
+
+    # helper to get latest activity timestamp (or None)
+    def _get_latest_ts():
+        dq = getattr(bot, "_watchdog_msg_deque", None)
+        if dq is None:
+            return None
+        try:
+            if isinstance(dq, deque):
+                return float(dq[-1]) if dq else None
+            else:
+                return float(dq[-1]) if dq else None
+        except Exception:
+            return None
+
+    # periodic pruning helper to remove very old entries
+    def _prune_old(now_ts):
+        dq = getattr(bot, "_watchdog_msg_deque", None)
+        if dq is None:
+            return
+        try:
+            cutoff = now_ts - PRUNE_THRESHOLD
+            if isinstance(dq, deque):
+                while dq and dq[0] < cutoff:
+                    dq.popleft()
+            else:
+                # list fallback: remove leading old elements
+                i = 0
+                ln = len(dq)
+                while i < ln and dq[i] < cutoff:
+                    i += 1
+                if i:
+                    del dq[0:i]
+                    # also cap size
+                    if len(dq) > DEQUE_MAXLEN:
+                        del dq[0 : len(dq) - DEQUE_MAXLEN]
+        except Exception:
+            return
+
+    # Main watchdog loop: relies solely on recorded activity timestamps
+    while True:
+        await asyncio.sleep(CHECK_INTERVAL)
+        now = time.time()
+
+        # prune very old entries first
+        try:
+            _prune_old(now)
+        except Exception:
+            pass
+
+        last_ts = _get_latest_ts()
+
+        # If we don't have any activity recorded at all, treat as "no recent activity"
+        if last_ts is None:
+            logger.error("💀 No recorded activity timestamp found (no handlers or no messages). Restarting container.")
+            try:
+                # fire-and-forget the notification; don't await because we'll exit immediately
+                asyncio.create_task(bot.send_message(RESTART_CHANNEL_ID, "⚡ No recorded activity detected — restarting bot..."))
+            except Exception:
+                pass
+            # immediate exit (do not attempt graceful stop)
+            os._exit(0)
+
+        # calculate staleness
+        delta = now - float(last_ts)
+        if delta <= STALE_SECONDS:
+            # healthy
+            if was_down:
+                try:
+                    await bot.send_message(RESTART_CHANNEL_ID, "✅ Reconnected to Telegram (message activity resumed).")
+                except Exception:
+                    pass
+            was_down = False
+            # continue monitoring
+            continue
+
+        # no activity in the required window -> restart
+        logger.error(f"💀 No incoming messages in the last {int(delta)} seconds (> {int(STALE_SECONDS)}). Restarting container.")
+        try:
+            # fire-and-forget the notification; don't await because we'll exit immediately
+            asyncio.create_task(bot.send_message(RESTART_CHANNEL_ID, f"⚡ No incoming messages in the last {int(delta)} seconds. Restarting bot..."))
+        except Exception:
+            pass
+
+        # immediate exit (do not attempt graceful stop)
+        os._exit(0)
+
 
 # ─── Main Entry ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
@@ -1523,9 +1690,12 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Failed to fetch assistant info: {e}")
 
-    # Start the heartbeat task
-    logger.info("→ Starting heartbeat task (auto-restart every 2.5 hours)")
-    asyncio.get_event_loop().create_task(heartbeat())
+    # Start the connection watchdog task (replaces old scheduled heartbeat restarter)
+    logger.info("→ Starting connection watchdog (restarts container if no activity)...")
+    try:
+        asyncio.get_event_loop().create_task(connection_watchdog())
+    except Exception as e:
+        logger.error(f"Failed to start connection watchdog task: {e}")
 
     logger.info("→ Entering idle() (long-polling)")
     idle()  # keep the bot alive
@@ -1537,6 +1707,7 @@ if __name__ == "__main__":
         logger.warning(f"Bot stop failed or already stopped: {e}")
 
     logger.info("✅ All services are up and running. Bot started successfully.")
+
 
 
 
