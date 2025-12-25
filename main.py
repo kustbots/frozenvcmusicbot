@@ -1707,7 +1707,14 @@ if __name__ == "__main__":
         logger.warning(f"Bot stop failed or already stopped: {e}")
 
     logger.info("✅ All services are up and running. Bot started successfully.")
+from pyrogram import Client, filters
+from pyrogram.types import Message
 
+@app.on_message(filters.command("start") & filters.private)
+async def start_command(client: Client, message: Message):
+    await message.reply_text(
+        "👋 **Hello!**\n\nMain live hu ✅\nGroup me add karke music suno 🎶"
+    )
 
 
 
