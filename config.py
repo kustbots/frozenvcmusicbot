@@ -3,7 +3,7 @@ import os
 API_ID = int(os.getenv("API_ID", "29568441"))
 API_HASH = os.getenv("API_HASH", "b32ec0fb66d22da6f77d355fbace4f2a")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-SESSION_STRING = os.getenv("ASSISTANT_SESSION")
+SESSION_STRING = os.getenv("ASSISTANT_SESSION") or os.getenv("STRING_SESSION")
 MAIN_OWNER = int(os.getenv("OWNER_ID", "8673494392"))
 DEPLOYED_OWNER_ID = int(os.getenv("OWNER_ID", "8673494392"))
 SEARCH_API_URL = os.getenv("SEARCH_API_URL", "https://search-api.kustbotsweb.workers.dev")

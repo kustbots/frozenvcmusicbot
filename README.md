@@ -128,6 +128,8 @@ Add these in Render's **Environment** tab:
 - Click **"Create Web Service"** — build takes ~3 minutes
 
 > 💡 **How to get ASSISTANT_SESSION:** Use [@StringFatherBot](https://t.me/StringFatherBot) to generate a Pyrogram string session from your Telegram account.
+>
+> ⚠️ If it's missing (or misnamed), `user_app` has no session to log in with and Pyrogram falls back to an interactive phone-number prompt — which crash-loops on platforms like Render with `EOFError: EOF when reading a line` since there's no terminal to answer it. `STRING_SESSION` is also accepted as an alias for `ASSISTANT_SESSION`, but double check the exact key your platform saved.
 
 ---
 
